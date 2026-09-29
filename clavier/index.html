@@ -81,6 +81,22 @@ table{border-collapse:collapse;width:100%;font-size:13px}td,th{border-bottom:1px
   <div id="status" style="margin-top:8px"></div>
 </section>
 
+
+<section id="secCh" hidden>
+  <h2>3. Programmation du clavier (puce CH57x)</h2>
+  <p id="chInfo" class="mut" style="margin:0 0 8px"></p>
+  <p class="mut" style="margin:0 0 10px">Ces puces ne permettent pas de <b>relire</b> leur mémoire : l'appli affiche donc la dernière programmation envoyée depuis ce navigateur (à gauche), et le testeur ci-dessous permet de vérifier ce que le clavier envoie réellement.</p>
+  <div class="row">
+    <label>Touches <input type="number" id="chBtns" min="1" max="12" value="6"></label>
+    <label>Potentiomètres <input type="number" id="chKnobs" min="0" max="3" value="1"></label>
+    <label>Couche <select id="chLayer"><option value="0">1</option><option value="1">2</option><option value="2">3</option></select></label>
+    <button class="p" id="chWriteAll">Tout écrire dans le clavier</button>
+    <button id="chUsb" hidden>Connexion WebUSB…</button>
+  </div>
+  <table id="chTable" style="margin-top:10px"></table>
+  <details style="margin-top:8px"><summary class="mut">Trames envoyées</summary><pre id="chDump">—</pre></details>
+</section>
+
 <section>
   <h2>Testeur de touches (lecture de ce que le clavier envoie)</h2>
   <p class="mut" style="margin:0 0 8px">Marche avec n'importe quelle puce, même sans protocole de configuration : cliquez ici, puis appuyez sur chaque touche et tournez/appuyez le potentiomètre.</p>
@@ -151,7 +167,7 @@ function kcLabel(k) {
 /* ---------- Périphériques connus ---------- */
 const KNOWN = {
   '1189:8840': 'Mini clavier CH552 (6 touches + potentiomètre)', '1189:8842': 'Mini clavier CH552', '1189:8890': 'Mini clavier CH57x (« 6 touches + bouton »)',
-  '1189:8850': 'Mini clavier CH552', '4C4B:4954': 'Clavier CH57x générique'
+  '1189:8850': 'Mini clavier CH552', '514C:8851': 'Mini clavier CH57x', '4C4B:4954': 'Clavier CH57x générique'
 };
 
 /* ---------- État ---------- */
@@ -232,6 +248,8 @@ async function inspect(d) {
   $('#secRaw').hidden = !d.collections.some(c => c.usagePage >= 0xFF00);
   d.oninputreport = e => rawLog('← ' + [...new Uint8Array(e.data.buffer)].map(x => x.toString(16).padStart(2, '0')).join(' '), e.reportId);
   const msg = $('#protoMsg');
+  $('#secCh').hidden = true;
+  if (CH57[id.toUpperCase()]) { chStart(d, id.toUpperCase()); msg.innerHTML = ''; return; }
   if (!hasVia(d)) {
     msg.innerHTML = `<p class="tag warn" style="display:block;padding:8px">Protocole de configuration compatible (VIA/QMK) non détecté sur cette entrée.</p>
       <p class="mut">Beaucoup de mini-claviers à puce CH552/CH57x (VID 1189) utilisent un protocole propriétaire non documenté par le navigateur, sans commande de lecture : leur contenu ne peut pas être lu directement. Utilisez le <b>Testeur de touches</b> ci-dessus pour relever ce que chaque touche envoie, et la console brute si vous connaissez le protocole. Si plusieurs entrées ont été listées pour ce périphérique, essayez les autres.</p>`;
@@ -367,6 +385,165 @@ $('#tester').addEventListener('keydown', e => {
   const tb = $('#testLog tbody'); tb.prepend(tr); while (tb.children.length > 30) tb.lastChild.remove();
 });
 $('#tester').addEventListener('wheel', e => { e.preventDefault(); const tr = document.createElement('tr'); tr.innerHTML = `<td>Molette</td><td>${e.deltaY < 0 ? '↑' : '↓'}</td><td>—</td>`; $('#testLog tbody').prepend(tr); });
+
+
+/* ---------- Puces CH57x (protocole de ch57x-keyboard-tool) ---------- */
+const CH57 = { // model: 'a' = 884x, 'b' = 8890 ; ep = endpoint OUT USB
+  '1189:8840': { m: 'a', ep: 4 }, '1189:8842': { m: 'a', ep: 4 }, '1189:8850': { m: 'a', ep: 4 },
+  '514C:8851': { m: 'a', ep: 2 }, '1189:8890': { m: 'b', ep: 2 }
+};
+const CH_MEDIA = [['Muet',0xE2],['Volume +',0xE9],['Volume −',0xEA],['Piste suivante',0xB5],['Piste précédente',0xB6],['Stop',0xB7],['Lecture/Pause',0xCD],
+  ['Luminosité +',0x6F],['Luminosité −',0x70],['Favoris',0x182],['Calculatrice',0x192],['Verrouiller l’écran',0x19E],['Page web : accueil',0x223],['Page web : précédent',0x224],['Page web : suivant',0x225]];
+const CH_MODS = { ctrl:1, shift:2, alt:4, opt:4, win:8, cmd:8, rctrl:16, rshift:32, ralt:64, ropt:64, rwin:128, rcmd:128 };
+const CH_NAMES = { enter:0x28, return:0x28, esc:0x29, escape:0x29, backspace:0x2A, tab:0x2B, space:0x2C, minus:0x2D, equal:0x2E, '-':0x2D, '=':0x2E,
+  '[':0x2F, ']':0x30, '\\':0x31, ';':0x33, "'":0x34, '`':0x35, ',':0x36, '.':0x37, '/':0x38, capslock:0x39, printscreen:0x46, scrolllock:0x47, pause:0x48,
+  insert:0x49, home:0x4A, pageup:0x4B, delete:0x4C, del:0x4C, end:0x4D, pagedown:0x4E, right:0x4F, left:0x50, down:0x51, up:0x52, menu:0x65 };
+function chCode(t) {
+  t = t.toLowerCase();
+  if (/^[a-z]$/.test(t)) return t.charCodeAt(0) - 93;
+  if (/^[1-9]$/.test(t)) return 0x1E + (+t) - 1;
+  if (t === '0') return 0x27;
+  let m = t.match(/^f(\d{1,2})$/); if (m && +m[1] >= 1 && +m[1] <= 24) return +m[1] <= 12 ? 0x39 + +m[1] : 0x68 + +m[1] - 13;
+  m = t.match(/^<(\d{1,3})>$/); if (m && +m[1] < 256) return +m[1];
+  if (t in CH_NAMES) return CH_NAMES[t];
+  throw new Error('Touche inconnue : « ' + t + ' »');
+}
+function chParse(text) { // "ctrl+c ctrl+v" -> [[mods, code|null], ...]
+  const out = [];
+  text.trim().split(/[\s,]+/).filter(Boolean).forEach(ch => {
+    let mods = 0, code = null;
+    ch.split('+').forEach((tok, i, arr) => {
+      const l = tok.toLowerCase();
+      if (l in CH_MODS) mods |= CH_MODS[l]; else code = chCode(tok === '' ? '+' : tok);
+    });
+    out.push([mods, code]);
+  });
+  if (!out.length) throw new Error('Combinaison vide');
+  return out;
+}
+function chKeyId(m, kind, i, act) { // kind 'b' bouton, 'k' potentiomètre ; act 0=gauche 1=appui 2=droite
+  if (kind === 'b') return i + 1;
+  return (m === 'a' ? 16 : 13) + 3 * i + act;
+}
+const pad = a => { const o = new Uint8Array(64); o.set(a); return o; };
+function chBuild(model, layer, id, slot) {
+  const L = layer + 1, msgs = [];
+  let kind, data;
+  if (slot.type === 'key') { kind = 1; data = chParse(slot.text); if (data.length > (model === 'a' ? 18 : 5)) throw new Error('Séquence trop longue'); }
+  else if (slot.type === 'media') { kind = 2; data = +slot.media; }
+  else if (slot.type === 'click') { kind = 3; data = slot.btn | 0; if (!data) throw new Error('Choisissez au moins un bouton de souris'); }
+  else { kind = 3; data = +slot.wheel || 0; }
+  const wheel = slot.type === 'wheel';
+  if (model === 'a') {
+    const m = [3, 0xFE, id, L, kind, 0, 0, 0, 0, 0];
+    if (kind === 1) { m.push(data.length === 1 && data[0][1] == null ? 0 : data.length); data.forEach(([md, c]) => m.push(md, c || 0)); }
+    else if (kind === 2) m.push(0, data & 255, data >> 8, 0, 0, 0, 0);
+    else if (wheel) m.push(3, 0, 0, 0, 0, data & 255);
+    else m.push(1, 0, data);
+    msgs.push(pad(m), pad([3, 0xAA, 0xAA]), pad([3, 0xFD, 0xFE, 0xFF]), pad([3, 0xAA, 0xAA]));
+  } else {
+    msgs.push(pad([3, 0xFE, L, 1, 1]));
+    const hi = (L << 4) | kind;
+    if (kind === 1) [[0, 0], ...data].forEach(([md, c], i) => msgs.push(pad([3, id, hi, data.length, i, md, c || 0])));
+    else if (kind === 2) msgs.push(pad([3, id, hi, data & 255, data >> 8]));
+    else if (wheel) msgs.push(pad([3, id, hi, 0, 0, 0, data & 255, 0]));
+    else msgs.push(pad([3, id, hi, data, 0, 0, 0, 0]));
+    msgs.push(pad([3, 0xAA, 0xAA]));
+  }
+  return msgs;
+}
+
+const CH = { info: null, usb: null, usbEp: 0, slots: {}, key: '' };
+function chLoad() { try { CH.slots = JSON.parse(localStorage.getItem('clavier-ch-' + CH.key) || '{}'); } catch { CH.slots = {}; } }
+function chSave() { try { localStorage.setItem('clavier-ch-' + CH.key, JSON.stringify(CH.slots)); } catch {} }
+function chHidPlan(d) {
+  for (const c of d.collections) for (const r of (c.outputReports || [])) {
+    const bits = (r.items || []).reduce((a, i) => a + i.reportSize * i.reportCount, 0);
+    return { id: r.reportId, len: bits ? Math.ceil(bits / 8) : (r.reportId ? 63 : 64) };
+  }
+  return null;
+}
+async function chTransmit(msgs) {
+  $('#chDump').textContent = msgs.map(m => [...m].map(x => x.toString(16).padStart(2, '0')).join(' ')).join('\n');
+  if (CH.usb) {
+    for (const m of msgs) await CH.usb.transferOut(CH.usbEp, m);
+    return;
+  }
+  const plan = chHidPlan(S.dev);
+  if (!plan) throw new Error('Cette entrée HID n’accepte pas d’écriture. Choisissez l’autre entrée du même clavier, ou utilisez WebUSB.');
+  for (const m of msgs) {
+    if (plan.id) { const b = new Uint8Array(plan.len); b.set(m.subarray(1, 1 + plan.len)); await S.dev.sendReport(plan.id, b); }
+    else await S.dev.sendReport(0, m.subarray(0, plan.len));
+  }
+}
+function chSlots() {
+  const n = +$('#chBtns').value, k = +$('#chKnobs').value, out = [];
+  for (let i = 0; i < n; i++) out.push({ k: 'b' + i, kind: 'b', i, act: 0, name: 'Touche ' + (i + 1) });
+  for (let j = 0; j < k; j++) [['⟲ gauche', 0], ['appui', 1], ['⟳ droite', 2]].forEach(([nm, a]) => out.push({ k: 'k' + j + '_' + a, kind: 'k', i: j, act: a, name: 'Potentiomètre ' + (j + 1) + ' : ' + nm }));
+  return out;
+}
+const chSlotKey = (s, layer) => layer + ':' + s.k;
+function chRender() {
+  const layer = +$('#chLayer').value, t = $('#chTable'); t.innerHTML = '<tr><th>Emplacement</th><th>Action</th><th>Réglage</th><th></th></tr>';
+  chSlots().forEach(s => {
+    const key = chSlotKey(s, layer), v = CH.slots[key] || (CH.slots[key] = { type: 'key', text: '' });
+    const tr = document.createElement('tr');
+    const opts = [['key', 'Touche / raccourci'], ['media', 'Média'], ['click', 'Clic souris'], ['wheel', 'Molette']].map(([a, b]) => `<option value="${a}" ${v.type === a ? 'selected' : ''}>${b}</option>`).join('');
+    tr.innerHTML = `<td>${s.name}</td><td><select class="ty">${opts}</select></td><td class="cfg"></td><td><button class="wr">Écrire</button></td><td class="mut st"></td>`;
+    const cfg = tr.querySelector('.cfg');
+    const draw = () => {
+      if (v.type === 'media' && v.media == null) v.media = CH_MEDIA[0][1];
+      if (v.type === 'wheel' && v.wheel == null) v.wheel = 1;
+      if (v.type === 'key') cfg.innerHTML = `<input class="tx" style="width:100%" placeholder="ex : a   ou   ctrl+c   ou   ctrl+c ctrl+v" value="${(v.text || '').replace(/"/g, '&quot;')}">`;
+      else if (v.type === 'media') cfg.innerHTML = `<select class="md">${CH_MEDIA.map(([n, c]) => `<option value="${c}" ${+v.media === c ? 'selected' : ''}>${n}</option>`).join('')}</select>`;
+      else if (v.type === 'click') cfg.innerHTML = [['Gauche', 1], ['Droit', 2], ['Milieu', 4]].map(([n, b]) => `<label><input type="checkbox" class="bt" value="${b}" ${(v.btn | 0) & b ? 'checked' : ''}> ${n}</label> `).join('');
+      else cfg.innerHTML = `<select class="wh"><option value="1" ${v.wheel == 1 ? 'selected' : ''}>Vers le haut</option><option value="255" ${v.wheel == 255 ? 'selected' : ''}>Vers le bas</option></select>`;
+    };
+    draw();
+    tr.querySelector('.ty').onchange = e => { v.type = e.target.value; draw(); chSave(); };
+    cfg.addEventListener('input', () => {
+      const x = cfg.querySelector('.tx'), md = cfg.querySelector('.md'), wh = cfg.querySelector('.wh');
+      if (x) v.text = x.value; if (md) v.media = +md.value; if (wh) v.wheel = +wh.value;
+      if (v.type === 'click') v.btn = [...cfg.querySelectorAll('.bt')].reduce((a, b) => a | (b.checked ? +b.value : 0), 0);
+      chSave();
+    });
+    tr.querySelector('.wr').onclick = async () => { await chWrite([s], layer, tr.querySelector('.st')); };
+    t.appendChild(tr);
+  });
+}
+async function chWrite(list, layer, stEl) {
+  const model = CH.info.m;
+  try {
+    const msgs = [];
+    list.forEach(s => msgs.push(...chBuild(model, layer, chKeyId(model, s.kind, s.i, s.act), CH.slots[chSlotKey(s, layer)])));
+    await chTransmit(msgs);
+    if (stEl) { stEl.className = 'ok st'; stEl.textContent = 'Envoyé'; }
+    else document.querySelectorAll('#chTable .st').forEach(e => { e.className = 'ok st'; e.textContent = 'Envoyé'; });
+  } catch (e) { const t = e.message || String(e); if (stEl) { stEl.className = 'err st'; stEl.textContent = t; } else alert('Échec : ' + t); }
+}
+function chStart(d, id) {
+  CH.info = CH57[id]; CH.key = id; CH.usb = null; chLoad();
+  $('#secCh').hidden = false; $('#secCfg').hidden = true;
+  const plan = chHidPlan(d);
+  $('#chInfo').innerHTML = `Puce <b>${id}</b> reconnue (protocole ${CH.info.m === 'a' ? '884x' : '8890'}). ` +
+    (plan ? `<span class="ok">Écriture WebHID disponible sur cette entrée.</span>` : `<span class="err">Cette entrée HID n’a pas de rapport d’écriture : essayez l’autre entrée du même clavier dans la liste, ou WebUSB.</span>`);
+  $('#chUsb').hidden = !navigator.usb;
+  chRender();
+}
+$('#chUsb').onclick = async () => {
+  try {
+    const u = await navigator.usb.requestDevice({ filters: [{ vendorId: 0x1189 }, { vendorId: 0x514C }] });
+    await u.open(); if (!u.configuration) await u.selectConfiguration(1);
+    let found = null;
+    for (const i of u.configuration.interfaces) for (const a of i.alternates) for (const e of a.endpoints)
+      if (e.direction === 'out' && e.type === 'interrupt' && (e.endpointNumber === (CH.info.ep & 15))) found = { i: i.interfaceNumber, ep: e.endpointNumber };
+    if (!found) throw new Error('Aucun point de terminaison d’écriture trouvé');
+    await u.claimInterface(found.i); await u.transferOut(found.ep, new Uint8Array(64));
+    CH.usb = u; CH.usbEp = found.ep; $('#chInfo').innerHTML += ' <span class="ok">WebUSB connecté.</span>';
+  } catch (e) { alert('WebUSB : ' + e.message + '\n(Sous Windows, ce mode exige un pilote WinUSB ; préférez WebHID si possible.)'); }
+};
+$('#chWriteAll').onclick = () => chWrite(chSlots(), +$('#chLayer').value, null);
+['#chLayer', '#chBtns', '#chKnobs'].forEach(q => $(q).onchange = chRender);
 
 /* ---------- Init ---------- */
 $('#btnDemo').onclick = () => { S.demo = true; inspect(makeDemo()); };
