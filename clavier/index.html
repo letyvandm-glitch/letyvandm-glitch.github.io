@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Clavier 6 touches</title>
+<style>
+:root{--bg:#f5f6f8;--card:#fff;--fg:#1c2130;--mut:#6b7385;--line:#dde1e9;--acc:#3b6cf6;--acc-fg:#fff;--ok:#1a8a4a;--warn:#b26a00;--err:#c62f2f;--key:#eef1f7}
+@media(prefers-color-scheme:dark){:root{--bg:#12151c;--card:#1b202b;--fg:#e8ebf2;--mut:#98a0b3;--line:#2b3242;--acc:#6d94ff;--acc-fg:#0d1220;--ok:#4cc27f;--warn:#f0a83a;--err:#ff7070;--key:#252c3b}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,sans-serif}
+main{max-width:920px;margin:0 auto;padding:20px 16px 60px}
+h1{font-size:22px;margin:0 0 4px}h2{font-size:16px;margin:0 0 10px}
+.sub{color:var(--mut);margin:0 0 18px}
+section{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}
+button{font:inherit;border:1px solid var(--line);background:var(--key);color:var(--fg);border-radius:8px;padding:7px 12px;cursor:pointer}
+button.p{background:var(--acc);color:var(--acc-fg);border-color:var(--acc)}
+button:disabled{opacity:.45;cursor:default}
+input,select{font:inherit;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:6px 8px}
+input[type=number]{width:64px}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.dev{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:8px;display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.dev.sel{border-color:var(--acc)}
+.tag{display:inline-block;font-size:12px;border-radius:99px;padding:1px 8px;background:var(--key);color:var(--mut);margin:2px 4px 0 0}
+.tag.ok{color:var(--ok)}.tag.warn{color:var(--warn)}
+.mut{color:var(--mut)}.err{color:var(--err)}.ok{color:var(--ok)}
+.grid{display:grid;gap:8px;margin:12px 0}
+.k{min-height:64px;border-radius:10px;border:1px solid var(--line);background:var(--key);padding:6px;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;font-size:13px;word-break:break-word}
+.k small{color:var(--mut);font-size:11px}
+.k.no{opacity:.45}.k.enc{border-style:dashed}
+.k:hover{border-color:var(--acc)}
+.tabs{display:flex;gap:6px;flex-wrap:wrap}
+.tabs button.on{background:var(--acc);color:var(--acc-fg);border-color:var(--acc)}
+pre{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;overflow:auto;max-height:240px;font-size:12px;margin:8px 0 0}
+dialog{border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--fg);max-width:520px;width:calc(100% - 32px)}
+dialog::backdrop{background:#0007}
+.list{max-height:200px;overflow:auto;border:1px solid var(--line);border-radius:8px;margin:8px 0}
+.list div{padding:5px 10px;cursor:pointer;display:flex;justify-content:space-between}
+.list div:hover,.list div.on{background:var(--key)}
+table{border-collapse:collapse;width:100%;font-size:13px}td,th{border-bottom:1px solid var(--line);padding:4px 6px;text-align:left}
+</style>
+</head>
+<body>
+<main>
+<h1>Clavier 6 touches + potentiomètre</h1>
+<p class="sub">Lit d'abord ce qui est enregistré dans le clavier, puis permet de le modifier. Fonctionne dans Chrome / Edge (WebHID), en HTTPS.</p>
+
+<section>
+  <h2>1. Périphérique</h2>
+  <div class="row">
+    <button class="p" id="btnConnect">Chercher / autoriser un périphérique…</button>
+    <button id="btnDemo">Mode démo (sans clavier)</button>
+    <span id="support" class="mut"></span>
+  </div>
+  <div id="devs"></div>
+</section>
+
+<section id="secRead" hidden>
+  <h2>2. Lecture de l'appareil</h2>
+  <div id="ident"></div>
+  <div id="protoMsg"></div>
+</section>
+
+<section id="secCfg" hidden>
+  <h2>3. Configuration enregistrée</h2>
+  <div class="row">
+    <label>Lignes <input type="number" id="rows" min="1" max="8" value="2"></label>
+    <label>Colonnes <input type="number" id="cols" min="1" max="12" value="4"></label>
+    <label>Encodeurs <input type="number" id="encs" min="0" max="4" value="1"></label>
+    <select id="preset"><option value="">Préréglage…</option><option>1x6</option><option>2x3</option><option>3x2</option><option>2x4</option></select>
+    <button id="btnReread">Relire</button>
+  </div>
+  <p class="mut" style="margin:6px 0 0">La disposition (lignes × colonnes) n'est pas fournie par le protocole VIA : ajustez-la jusqu'à voir exactement vos 6 touches. Les cases vides (« — ») ne sont pas câblées.</p>
+  <div class="tabs" id="layers" style="margin-top:12px"></div>
+  <div class="grid" id="keys"></div>
+  <div id="encView"></div>
+  <div class="row" style="margin-top:10px">
+    <button id="btnExport">Exporter la sauvegarde (JSON)</button>
+    <label class="mut">Importer <input type="file" id="fileImport" accept="application/json"></label>
+  </div>
+  <div id="status" style="margin-top:8px"></div>
+</section>
+
+<section>
+  <h2>Testeur de touches (lecture de ce que le clavier envoie)</h2>
+  <p class="mut" style="margin:0 0 8px">Marche avec n'importe quelle puce, même sans protocole de configuration : cliquez ici, puis appuyez sur chaque touche et tournez/appuyez le potentiomètre.</p>
+  <input id="tester" placeholder="Cliquez ici puis appuyez sur une touche…" style="width:100%">
+  <table id="testLog" style="margin-top:8px"><thead><tr><th>Code</th><th>Touche</th><th>Modificateurs</th></tr></thead><tbody></tbody></table>
+</section>
+
+<section id="secRaw" hidden>
+  <h2>Console HID brute</h2>
+  <p class="mut" style="margin:0 0 8px">Pour les puces au protocole propriétaire : envoie un rapport (octets hexadécimaux) et affiche les réponses. À utiliser avec précaution.</p>
+  <div class="row"><input id="rawId" type="number" value="0" min="0" max="255" title="Report ID"><input id="rawHex" placeholder="ex: 01 00 00" style="flex:1;min-width:200px"><button id="rawSend">Envoyer</button></div>
+  <pre id="rawLog">—</pre>
+</section>
+</main>
+
+<dialog id="dlg">
+  <h2 id="dlgTitle">Affecter une touche</h2>
+  <input id="kcSearch" placeholder="Rechercher (A, Volume, F5, Entrée…)" style="width:100%">
+  <div class="list" id="kcList"></div>
+  <div class="row">
+    <label><input type="checkbox" class="mod" value="256"> Ctrl</label>
+    <label><input type="checkbox" class="mod" value="512"> Maj</label>
+    <label><input type="checkbox" class="mod" value="1024"> Alt</label>
+    <label><input type="checkbox" class="mod" value="2048"> Win/Cmd</label>
+  </div>
+  <div class="row" style="margin-top:8px">Code brut : <input id="kcHex" placeholder="0x0004" style="width:100px"> <b id="kcPrev"></b></div>
+  <div class="row" style="margin-top:12px;justify-content:flex-end"><button id="kcCancel">Annuler</button><button class="p" id="kcOk">Écrire dans le clavier</button></div>
+</dialog>
+
+<script>
+'use strict';
+const $ = s => document.querySelector(s);
+const hex = (n, w = 4) => '0x' + n.toString(16).toUpperCase().padStart(w, '0');
+const VIA_UP = 0xFF60, VIA_U = 0x61;
+
+/* ---------- Keycodes (QMK / VIA) ---------- */
+const KC = [[0, '—']];
+'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').forEach((c, i) => KC.push([4 + i, c]));
+'1234567890'.split('').forEach((c, i) => KC.push([0x1E + i, c]));
+KC.push(
+  [0x28,'Entrée'],[0x29,'Échap'],[0x2A,'Retour arr.'],[0x2B,'Tab'],[0x2C,'Espace'],[0x2D,'-'],[0x2E,'='],[0x2F,'['],[0x30,']'],
+  [0x31,'\\'],[0x33,';'],[0x34,"'"],[0x35,'`'],[0x36,','],[0x37,'.'],[0x38,'/'],[0x39,'Verr Maj'],
+  [0x46,'Impr écran'],[0x47,'Arrêt défil'],[0x48,'Pause'],[0x49,'Inser'],[0x4A,'Début'],[0x4B,'Page ↑'],[0x4C,'Suppr'],[0x4D,'Fin'],[0x4E,'Page ↓'],
+  [0x4F,'→'],[0x50,'←'],[0x51,'↓'],[0x52,'↑'],
+  [0x65,'Menu'],[0x7F,'Muet (clavier)'],[0x80,'Vol+ (clavier)'],[0x81,'Vol− (clavier)'],
+  [0xA5,'Système: éteindre'],[0xA6,'Système: veille'],[0xA7,'Système: réveil'],
+  [0xA8,'Muet'],[0xA9,'Volume +'],[0xAA,'Volume −'],[0xAB,'Piste suivante'],[0xAC,'Piste précédente'],[0xAD,'Stop média'],[0xAE,'Lecture/Pause'],
+  [0xAF,'Sélection média'],[0xB0,'Éjecter'],[0xB1,'Mail'],[0xB2,'Calculatrice'],[0xB3,'Poste de travail'],[0xB4,'Recherche web'],
+  [0xB5,'Accueil web'],[0xB6,'Précédent web'],[0xB7,'Suivant web'],[0xB8,'Stop web'],[0xB9,'Actualiser'],[0xBA,'Favoris'],
+  [0xBB,'Avance rapide'],[0xBC,'Retour rapide'],[0xBD,'Luminosité +'],[0xBE,'Luminosité −'],
+  [0xCD,'Souris ↑'],[0xCE,'Souris ↓'],[0xCF,'Souris ←'],[0xD0,'Souris →'],
+  [0xD1,'Clic gauche'],[0xD2,'Clic droit'],[0xD3,'Clic milieu'],[0xD4,'Souris btn4'],[0xD5,'Souris btn5'],
+  [0xD9,'Molette ↑'],[0xDA,'Molette ↓'],
+  [0xE0,'Ctrl'],[0xE1,'Maj'],[0xE2,'Alt'],[0xE3,'Win/Cmd'],[0xE4,'Ctrl D'],[0xE5,'Maj D'],[0xE6,'Alt Gr'],[0xE7,'Win D']);
+for (let i = 0; i < 12; i++) KC.push([0x3A + i, 'F' + (i + 1)]);
+KC.sort((a, b) => a[0] - b[0]);
+const KCNAME = new Map(KC);
+const MODS = [[256,'Ctrl'],[512,'Maj'],[1024,'Alt'],[2048,'Win']];
+function kcLabel(k) {
+  if (k < 0x100) return KCNAME.get(k) || hex(k);
+  if (k < 0x2000) {
+    const base = k & 0xFF, m = MODS.filter(([b]) => k & b).map(x => x[1]);
+    return (m.length ? m.join('+') + '+' : '') + (KCNAME.get(base) || hex(base, 2)) + (k & 0x1000 ? ' (droite)' : '');
+  }
+  return hex(k);
+}
+
+/* ---------- Périphériques connus ---------- */
+const KNOWN = {
+  '1189:8840': 'Mini clavier CH552 (6 touches + potentiomètre)', '1189:8842': 'Mini clavier CH552', '1189:8890': 'Mini clavier CH57x (« 6 touches + bouton »)',
+  '1189:8850': 'Mini clavier CH552', '4C4B:4954': 'Clavier CH57x générique'
+};
+
+/* ---------- État ---------- */
+const S = { dev: null, demo: false, via: false, layers: 1, rows: 2, cols: 4, encs: 1, layer: 0, map: [], enc: [], queue: Promise.resolve() };
+const devKey = d => d.vendorId.toString(16).toUpperCase().padStart(4, '0') + ':' + d.productId.toString(16).toUpperCase().padStart(4, '0');
+const hasVia = d => d.collections.some(c => c.usagePage === VIA_UP && c.usage === VIA_U);
+function setStatus(t, cls = '') { $('#status').innerHTML = `<span class="${cls}">${t}</span>`; }
+
+/* ---------- HID: requête/réponse (32 octets, sans report ID) ---------- */
+function request(bytes, timeout = 900) {
+  const run = () => new Promise((res, rej) => {
+    const d = S.dev;
+    const t = setTimeout(() => { d.removeEventListener('inputreport', h); rej(new Error('Pas de réponse')); }, timeout);
+    function h(e) {
+      const a = new Uint8Array(e.data.buffer, e.data.byteOffset, e.data.byteLength);
+      if (a[0] === bytes[0] || a[0] === 0xFF) { clearTimeout(t); d.removeEventListener('inputreport', h); res(a); }
+    }
+    d.addEventListener('inputreport', h);
+    const buf = new Uint8Array(32); buf.set(bytes);
+    d.sendReport(0, buf).catch(e => { clearTimeout(t); d.removeEventListener('inputreport', h); rej(e); });
+  });
+  const p = S.queue.then(run, run); S.queue = p.catch(() => {}); return p;
+}
+
+/* ---------- Démo : faux clavier VIA ---------- */
+function makeDemo() {
+  const listeners = new Set(), kc = {}, enc = { '0:0:1': 0xA9, '0:0:0': 0xAA };
+  const demo = [0xA8, 0x04, 0x05, 0x06, 0x07, 0x08];
+  demo.forEach((v, i) => kc['0:' + Math.floor(i / 3) + ':' + (i % 3)] = v);
+  return {
+    vendorId: 0xFEED, productId: 0x0001, productName: 'Démo VIA (simulé)', opened: true,
+    collections: [{ usagePage: VIA_UP, usage: VIA_U, inputReports: [{}], outputReports: [{}], featureReports: [] }],
+    addEventListener: (_, f) => listeners.add(f), removeEventListener: (_, f) => listeners.delete(f),
+    async sendReport(_, d) {
+      const o = new Uint8Array(32); o.set(d.subarray(0, 32)); const c = d[0];
+      if (c === 1) { o[1] = 0; o[2] = 9; }
+      else if (c === 0x11) o[1] = 3;
+      else if (c === 4) { const v = kc[`${d[1]}:${d[2]}:${d[3]}`] || 0; o[4] = v >> 8; o[5] = v & 255; }
+      else if (c === 5) kc[`${d[1]}:${d[2]}:${d[3]}`] = (d[4] << 8) | d[5];
+      else if (c === 0x14) { const v = enc[`${d[1]}:${d[2]}:${d[3]}`] || 0; o[4] = v >> 8; o[5] = v & 255; }
+      else if (c === 0x15) enc[`${d[1]}:${d[2]}:${d[3]}`] = (d[4] << 8) | d[5];
+      else if (c === 0xFE) o[0] = 0xFF;
+      setTimeout(() => listeners.forEach(f => f({ data: new DataView(o.buffer) })), 5);
+    }
+  };
+}
+
+/* ---------- Liste des périphériques ---------- */
+async function refreshDevices() {
+  const el = $('#devs'); el.innerHTML = '';
+  const list = navigator.hid ? await navigator.hid.getDevices() : [];
+  if (S.demo && S.dev) list.push(S.dev);
+  if (!list.length) el.innerHTML = '<p class="mut">Aucun périphérique autorisé pour l’instant. Cliquez sur « Chercher / autoriser » et choisissez votre clavier dans la liste (essayez chaque entrée portant le nom de la puce si plusieurs apparaissent).</p>';
+  list.forEach(d => {
+    const id = devKey(d), div = document.createElement('div');
+    div.className = 'dev' + (S.dev === d ? ' sel' : '');
+    const cols = d.collections.map(c => `<span class="tag ${c.usagePage === VIA_UP ? 'ok' : ''}">page ${hex(c.usagePage)} / usage ${hex(c.usage, 2)}</span>`).join('');
+    div.innerHTML = `<div><b>${d.productName || 'Périphérique sans nom'}</b> <span class="mut">${id}</span>${KNOWN[id] ? `<br><span class="tag ok">${KNOWN[id]}</span>` : ''}<br>${cols}</div>`;
+    const b = document.createElement('button'); b.className = 'p'; b.textContent = 'Lire';
+    b.onclick = () => inspect(d); div.appendChild(b); el.appendChild(div);
+  });
+}
+
+async function connect() {
+  try { await navigator.hid.requestDevice({ filters: [] }); } catch (e) { return alert('Erreur : ' + e.message); }
+  refreshDevices();
+}
+
+/* ---------- Lecture / identification ---------- */
+async function inspect(d) {
+  S.dev = d; S.via = false; refreshDevices();
+  $('#secRead').hidden = false; $('#secCfg').hidden = true;
+  try { if (!d.opened) await d.open(); } catch (e) { $('#ident').innerHTML = `<p class="err">Ouverture impossible : ${e.message} (un autre logiciel utilise peut-être le clavier).</p>`; return; }
+  const id = devKey(d);
+  const rep = c => `${c.inputReports.length} entrée(s), ${c.outputReports.length} sortie(s), ${c.featureReports.length} feature`;
+  $('#ident').innerHTML = `<p><b>${d.productName || '?'}</b> — VID:PID <code>${id}</code> ${KNOWN[id] ? '· reconnu : ' + KNOWN[id] : ''}</p>
+    <table><tr><th>Usage page</th><th>Usage</th><th>Rapports</th></tr>${d.collections.map(c => `<tr><td>${hex(c.usagePage)}</td><td>${hex(c.usage, 2)}</td><td>${rep(c)}</td></tr>`).join('')}</table>`;
+  $('#secRaw').hidden = !d.collections.some(c => c.usagePage >= 0xFF00);
+  d.oninputreport = e => rawLog('← ' + [...new Uint8Array(e.data.buffer)].map(x => x.toString(16).padStart(2, '0')).join(' '), e.reportId);
+  const msg = $('#protoMsg');
+  if (!hasVia(d)) {
+    msg.innerHTML = `<p class="tag warn" style="display:block;padding:8px">Protocole de configuration compatible (VIA/QMK) non détecté sur cette entrée.</p>
+      <p class="mut">Beaucoup de mini-claviers à puce CH552/CH57x (VID 1189) utilisent un protocole propriétaire non documenté par le navigateur, sans commande de lecture : leur contenu ne peut pas être lu directement. Utilisez le <b>Testeur de touches</b> ci-dessus pour relever ce que chaque touche envoie, et la console brute si vous connaissez le protocole. Si plusieurs entrées ont été listées pour ce périphérique, essayez les autres.</p>`;
+    return;
+  }
+  msg.innerHTML = '<p class="mut">Interrogation du clavier…</p>';
+  try {
+    const v = await request([1]); const ver = (v[1] << 8) | v[2];
+    let vial = '';
+    try { const r = await request([0xFE, 0]); if (r[0] === 0xFE) vial = ` · <span class="tag ok">Vial détecté</span>`; } catch {}
+    S.layers = Math.min((await request([0x11]))[1] || 1, 8);
+    msg.innerHTML = `<p class="ok">Protocole VIA v${ver} détecté${vial} · ${S.layers} couche(s).</p>`;
+    S.via = true; S.layer = 0;
+    $('#secCfg').hidden = false;
+    await readAll();
+  } catch (e) { msg.innerHTML = `<p class="err">Le clavier ne répond pas au protocole VIA (${e.message}). Il faut peut-être un firmware VIA/Vial.</p>`; }
+}
+
+async function readAll() {
+  S.rows = +$('#rows').value; S.cols = +$('#cols').value; S.encs = +$('#encs').value;
+  setStatus('Lecture en cours…', 'mut');
+  S.map = []; S.enc = [];
+  try {
+    for (let l = 0; l < S.layers; l++) {
+      S.map[l] = [];
+      for (let r = 0; r < S.rows; r++) { S.map[l][r] = [];
+        for (let c = 0; c < S.cols; c++) { const a = await request([4, l, r, c]); S.map[l][r][c] = (a[4] << 8) | a[5]; } }
+      S.enc[l] = [];
+      for (let i = 0; i < S.encs; i++) {
+        const cw = await request([0x14, l, i, 1]), ccw = await request([0x14, l, i, 0]);
+        S.enc[l][i] = { cw: (cw[4] << 8) | cw[5], ccw: (ccw[4] << 8) | ccw[5] };
+      }
+    }
+    setStatus('Configuration lue depuis le clavier.', 'ok');
+  } catch (e) { setStatus('Erreur de lecture : ' + e.message, 'err'); }
+  render();
+}
+
+/* ---------- Affichage ---------- */
+function render() {
+  const tabs = $('#layers'); tabs.innerHTML = '';
+  for (let l = 0; l < S.layers; l++) { const b = document.createElement('button'); b.textContent = 'Couche ' + l; b.className = l === S.layer ? 'on' : ''; b.onclick = () => { S.layer = l; render(); }; tabs.appendChild(b); }
+  const g = $('#keys'); g.innerHTML = ''; g.style.gridTemplateColumns = `repeat(${S.cols},1fr)`;
+  const m = S.map[S.layer] || [];
+  m.forEach((row, r) => row.forEach((k, c) => {
+    const d = document.createElement('div'); d.className = 'k' + (k ? '' : ' no');
+    d.innerHTML = `<b>${kcLabel(k)}</b><small>${hex(k)} · L${r}C${c}</small>`;
+    d.onclick = () => pick(`Touche ligne ${r}, colonne ${c}`, k, v => writeKey(r, c, v)); g.appendChild(d);
+  }));
+  const ev = $('#encView'); ev.innerHTML = '';
+  (S.enc[S.layer] || []).forEach((e, i) => {
+    const wrap = document.createElement('div'); wrap.className = 'grid'; wrap.style.gridTemplateColumns = 'repeat(2,1fr)';
+    [['ccw', '⟲ Potentiomètre ' + (i + 1) + ' : gauche'], ['cw', '⟳ Potentiomètre ' + (i + 1) + ' : droite']].forEach(([dir, name]) => {
+      const d = document.createElement('div'); d.className = 'k enc'; d.innerHTML = `<small>${name}</small><b>${kcLabel(e[dir])}</b><small>${hex(e[dir])}</small>`;
+      d.onclick = () => pick(name, e[dir], v => writeEnc(i, dir === 'cw' ? 1 : 0, v)); wrap.appendChild(d);
+    }); ev.appendChild(wrap);
+  });
+}
+
+/* ---------- Écriture ---------- */
+function backup() { try { localStorage.setItem('clavier-backup-' + devKey(S.dev) + '-' + Date.now(), JSON.stringify(snapshot())); } catch {} }
+function snapshot() { return { device: devKey(S.dev), name: S.dev.productName, rows: S.rows, cols: S.cols, layers: S.layers, keymap: S.map, encoders: S.enc, date: new Date().toISOString() }; }
+async function writeKey(r, c, v) {
+  backup();
+  try { await request([5, S.layer, r, c, v >> 8, v & 255]); const a = await request([4, S.layer, r, c]); S.map[S.layer][r][c] = (a[4] << 8) | a[5]; setStatus('Touche enregistrée et relue : ' + kcLabel(S.map[S.layer][r][c]), 'ok'); }
+  catch (e) { setStatus('Échec d’écriture : ' + e.message, 'err'); } render();
+}
+async function writeEnc(i, cw, v) {
+  backup();
+  try { await request([0x15, S.layer, i, cw, v >> 8, v & 255]); const a = await request([0x14, S.layer, i, cw]); S.enc[S.layer][i][cw ? 'cw' : 'ccw'] = (a[4] << 8) | a[5]; setStatus('Potentiomètre enregistré et relu.', 'ok'); }
+  catch (e) { setStatus('Échec d’écriture : ' + e.message, 'err'); } render();
+}
+
+/* ---------- Sélecteur de keycode ---------- */
+let pickCb = null;
+function pick(title, cur, cb) {
+  pickCb = cb; $('#dlgTitle').textContent = title; $('#kcSearch').value = '';
+  document.querySelectorAll('.mod').forEach(m => m.checked = cur < 0x2000 && (cur & +m.value));
+  $('#kcHex').value = hex(cur); fillList(); prev(); $('#dlg').showModal();
+}
+function fillList() {
+  const q = $('#kcSearch').value.toLowerCase(), base = parseInt($('#kcHex').value) & 0xFF;
+  const l = $('#kcList'); l.innerHTML = '';
+  KC.filter(([c, n]) => !q || n.toLowerCase().includes(q)).forEach(([c, n]) => {
+    const d = document.createElement('div'); d.className = c === base ? 'on' : ''; d.innerHTML = `<span>${n}</span><span class="mut">${hex(c, 2)}</span>`;
+    d.onclick = () => { setCode(c | mods()); }; l.appendChild(d);
+  });
+}
+const mods = () => [...document.querySelectorAll('.mod')].reduce((a, m) => a | (m.checked ? +m.value : 0), 0);
+function setCode(v) { $('#kcHex').value = hex(v); prev(); fillList(); }
+function prev() { const v = parseInt($('#kcHex').value); $('#kcPrev').textContent = isNaN(v) ? '?' : kcLabel(v); }
+$('#kcSearch').oninput = fillList;
+$('#kcHex').oninput = () => { prev(); fillList(); };
+document.querySelectorAll('.mod').forEach(m => m.onchange = () => { const v = parseInt($('#kcHex').value) || 0; setCode((v & 0xFF) | mods()); });
+$('#kcCancel').onclick = () => $('#dlg').close();
+$('#kcOk').onclick = () => { const v = parseInt($('#kcHex').value); if (isNaN(v) || v < 0 || v > 0xFFFF) return; $('#dlg').close(); pickCb(v); };
+
+/* ---------- Sauvegarde ---------- */
+$('#btnExport').onclick = () => {
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(snapshot(), null, 2)], { type: 'application/json' }));
+  a.download = 'clavier-' + devKey(S.dev).replace(':', '-') + '.json'; a.click();
+};
+$('#fileImport').onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  try {
+    const j = JSON.parse(await f.text());
+    if (!confirm('Écrire cette sauvegarde dans le clavier ? La configuration actuelle sera remplacée (une copie de secours est gardée dans ce navigateur).')) return;
+    backup(); setStatus('Écriture en cours…', 'mut');
+    for (let l = 0; l < Math.min(j.layers, S.layers); l++) {
+      j.keymap[l].forEach((row, r) => row.forEach((v, c) => { if (r < S.rows && c < S.cols) S.queue = S.queue.then(() => request([5, l, r, c, v >> 8, v & 255])); }));
+      (j.encoders[l] || []).forEach((en, i) => ['ccw', 'cw'].forEach(d => S.queue = S.queue.then(() => request([0x15, l, i, d === 'cw' ? 1 : 0, en[d] >> 8, en[d] & 255]))));
+    }
+    await S.queue; await readAll();
+  } catch (err) { setStatus('Import impossible : ' + err.message, 'err'); }
+  e.target.value = '';
+};
+$('#btnReread').onclick = readAll;
+$('#preset').onchange = e => { if (!e.target.value) return; const [r, c] = e.target.value.split('x'); $('#rows').value = r; $('#cols').value = c; readAll(); };
+
+/* ---------- Console brute ---------- */
+function rawLog(t, id) { const p = $('#rawLog'); p.textContent = (p.textContent === '—' ? '' : p.textContent + '\n') + (id ? `[id ${id}] ` : '') + t; p.scrollTop = 1e9; }
+$('#rawSend').onclick = async () => {
+  if (!S.dev) return;
+  const bytes = new Uint8Array($('#rawHex').value.trim().split(/\s+/).filter(Boolean).map(x => parseInt(x, 16)));
+  try { await S.dev.sendReport(+$('#rawId').value, bytes); rawLog('→ ' + [...bytes].map(x => x.toString(16).padStart(2, '0')).join(' ')); } catch (e) { rawLog('Erreur : ' + e.message); }
+};
+
+/* ---------- Testeur ---------- */
+$('#tester').addEventListener('keydown', e => {
+  e.preventDefault();
+  const m = ['ctrlKey','shiftKey','altKey','metaKey'].filter(k => e[k]).map(k => k.replace('Key','')).join('+') || '—';
+  const tr = document.createElement('tr'); tr.innerHTML = `<td>${e.code}</td><td>${e.key}</td><td>${m}</td>`;
+  const tb = $('#testLog tbody'); tb.prepend(tr); while (tb.children.length > 30) tb.lastChild.remove();
+});
+$('#tester').addEventListener('wheel', e => { e.preventDefault(); const tr = document.createElement('tr'); tr.innerHTML = `<td>Molette</td><td>${e.deltaY < 0 ? '↑' : '↓'}</td><td>—</td>`; $('#testLog tbody').prepend(tr); });
+
+/* ---------- Init ---------- */
+$('#btnDemo').onclick = () => { S.demo = true; inspect(makeDemo()); };
+if (navigator.hid) {
+  $('#btnConnect').onclick = connect;
+  navigator.hid.addEventListener('connect', refreshDevices);
+  navigator.hid.addEventListener('disconnect', () => { refreshDevices(); });
+  refreshDevices();
+} else {
+  $('#btnConnect').disabled = true;
+  $('#support').innerHTML = '<span class="err">WebHID indisponible : utilisez Chrome ou Edge (ordinateur).</span>';
+  refreshDevices();
+}
+</script>
+</body>
+</html>
