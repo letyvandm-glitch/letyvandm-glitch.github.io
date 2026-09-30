@@ -118,6 +118,11 @@ table{border-collapse:collapse;width:100%;font-size:13px}td,th{border-bottom:1px
     <div id="chPad"></div>
     <div id="chEdit"></div>
   </div>
+  <div id="chLed" style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">
+    <h3 style="margin:0 0 8px;font-size:15px">Éclairage RGB</h3>
+    <div class="row" id="chLedRow"></div>
+    <p class="mut" id="chLedNote" style="margin:6px 0 0;font-size:12px"></p>
+  </div>
   <details style="margin-top:10px"><summary class="mut">Disposition et trames envoyées</summary>
     <div class="row" style="margin:8px 0">
       <label>Touches <input type="number" id="chBtns" min="1" max="12" value="6"></label>
@@ -637,6 +642,7 @@ async function chStart(d, id) {
   const plan = chHidPlan(d);
   $('#chInfo').innerHTML = `Puce <b>${id}</b> reconnue (protocole ${CH.info.m === 'a' ? '884x' : '8890'}). ` + (plan ? `<span class="ok">Écriture WebHID disponible.</span>` : '') + note;
   $('#chUsb').hidden = !navigator.usb;
+  chLedInit();
   chRender();
 }
 const CH_MEDIA_NAMES = { 0x6F: 'screenbrightnessup', 0x70: 'screenbrightnessdown', 0xB5: 'next', 0xB6: 'previous', 0xB7: 'stop', 0xCD: 'play', 0xE2: 'mute', 0xE9: 'volumeup', 0xEA: 'volumedown', 0x182: 'favorites', 0x192: 'calculator', 0x19E: 'screenlock', 0x223: 'webpagehome', 0x224: 'webpageback', 0x225: 'webpageforward' };
@@ -685,6 +691,38 @@ $('#chUsb').onclick = async () => {
 $('#chWriteAll').onclick = () => chWrite(chSlots(), +$('#chLayer').value, $('#chStatus'));
 ['#chLayer', '#chBtns', '#chKnobs'].forEach(q => $(q).onchange = chRender);
 
+
+/* ---------- Éclairage RGB (protocole de ch57x-keyboard-tool) ---------- */
+const LED_COLORS = [['Rouge', 1], ['Orange', 2], ['Jaune', 3], ['Vert', 4], ['Cyan', 5], ['Bleu', 6], ['Violet', 7]];
+const LED_MODES = [['off', 'Éteint'], ['backlight', 'Rétroéclairage fixe'], ['shock', 'Éclair à l’appui'], ['shock2', 'Éclair 2 à l’appui'], ['press', 'Touche allumée à l’appui']];
+function chLedCode(mode, color) { // même calcul que LedMode::code() de l'outil
+  const [m, c] = mode === 'off' ? [0, 0] : mode === 'backlight' ? (color === 0 ? [5, 0] : [1, color]) : mode === 'shock' ? [2, color] : mode === 'shock2' ? [3, color] : [4, color];
+  return (c << 4) | m;
+}
+function chLedBuild(model, layer, mode, color) {
+  if (model === 'a') return [pad([3, 0xFE, 0xB0, layer + 1, 8, 0, 0, 0, 0, 0, 1, 0, chLedCode(mode, color)]), pad([3, 0xFD, 0xFE, 0xFF])];
+  return [pad([3, 0xA1, 1]), pad([3, 0xB0, 0x18, mode]), pad([3, 0xAA, 0xA1])]; // 8890 : numéro de mode
+}
+function chLedInit() {
+  const row = $('#chLedRow'), a = CH.info.m === 'a';
+  if (a) {
+    row.innerHTML = `<select id="ledMode">${LED_MODES.map(([k, n]) => `<option value="${k}">${n}</option>`).join('')}</select>
+      <select id="ledColor"></select><button id="ledApply" class="p">Appliquer à la couche</button><span id="ledSt"></span>`;
+    const fill = () => { const m = $('#ledMode').value; $('#ledColor').innerHTML = (m === 'backlight' ? [['Blanc', 0]] : []).concat(LED_COLORS).map(([n, v]) => `<option value="${v}">${n}</option>`).join(''); $('#ledColor').hidden = m === 'off'; };
+    $('#ledMode').onchange = fill; fill();
+    $('#chLedNote').textContent = 'Le réglage s’applique à la couche sélectionnée ci-dessus. Ce protocole ne permet pas de couleur par touche.';
+  } else {
+    row.innerHTML = `<label>Mode d’éclairage <select id="ledMode">${[1, 2, 3, 4, 5, 6, 7, 8].map(n => `<option value="${n}">Mode ${n}${n === 1 ? ' (fixe)' : ''}</option>`).join('')}</select></label><button id="ledApply" class="p">Appliquer</button><span id="ledSt"></span>`;
+    $('#chLedNote').textContent = 'Pour ce modèle (8890), seul le numéro de mode est réglable ; la couleur dépend du mode. La liste exacte des modes n’est pas documentée : essayez-les un par un.';
+  }
+  $('#ledApply').onclick = async () => {
+    const st = $('#ledSt'), layer = +$('#chLayer').value;
+    try {
+      const mode = a ? $('#ledMode').value : +$('#ledMode').value, color = a ? +($('#ledColor').value || 0) : 0;
+      await chTransmit(chLedBuild(CH.info.m, layer, mode, color)); st.className = 'ok'; st.textContent = ' Envoyé ✔';
+    } catch (e) { st.className = 'err'; st.textContent = ' ' + e.message; }
+  };
+}
 
 /* ---------- Image du clavier ---------- */
 const chLabel = v => !v ? '—' : v.type === 'key' ? (v.text || '—') : v.type === 'media' ? ((CH_MEDIA.find(m => m[1] === +v.media) || [''])[0] || '—')
