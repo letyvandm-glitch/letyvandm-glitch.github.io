@@ -1,0 +1,28 @@
+# Généré par l'appli Clavier — à utiliser avec ch57x-keyboard-tool (validate puis upload)
+model: ch57x-2
+orientation: normal
+rows: 2
+columns: 3
+knobs: 1
+layers:
+  - buttons:
+      - ["ctrl-<58>", "ctrl-<59>", "ctrl-<60>"]
+      - ["ctrl-a", "ctrl-c", "ctrl-v"]
+    knobs:
+      - ccw: "wheeldown"
+        press: "click"
+        cw: "wheeldown"
+  - buttons:
+      - ["ctrl-<58>", "ctrl-<59>", "ctrl-<60>"]
+      - ["ctrl-a", "ctrl-c", "ctrl-v"]
+    knobs:
+      - ccw: "wheeldown"
+        press: "click"
+        cw: "wheeldown"
+  - buttons:
+      - ["ctrl-<58>", "ctrl-<59>", "ctrl-<60>"]
+      - ["ctrl-a", "ctrl-c", "ctrl-v"]
+    knobs:
+      - ccw: "wheeldown"
+        press: "click"
+        cw: "wheeldown"
