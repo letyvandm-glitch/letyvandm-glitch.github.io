@@ -38,6 +38,13 @@ dialog::backdrop{background:#0007}
 .list div{padding:5px 10px;cursor:pointer;display:flex;justify-content:space-between}
 .list div:hover,.list div.on{background:var(--key)}
 table{border-collapse:collapse;width:100%;font-size:13px}td,th{border-bottom:1px solid var(--line);padding:4px 6px;text-align:left}
+#chPad svg{width:100%;max-width:640px;height:auto;display:block;margin:0 auto}
+.pk{cursor:pointer}.pk rect,.pk circle{fill:var(--key);stroke:var(--line);stroke-width:2;transition:fill .12s}
+.pk text{fill:var(--fg);font:11px system-ui,sans-serif;text-anchor:middle;pointer-events:none}.pk .t{fill:var(--mut);font-size:10px}
+.pk.sel rect,.pk.sel circle{stroke:var(--acc);stroke-width:4}
+.pk.on rect,.pk.on circle{fill:var(--acc)}.pk.on text{fill:var(--acc-fg)}
+#chPad .body{fill:var(--card);stroke:var(--line);stroke-width:2}
+tr.sel td{background:var(--key)}
 </style>
 </head>
 <body>
@@ -85,7 +92,7 @@ table{border-collapse:collapse;width:100%;font-size:13px}td,th{border-bottom:1px
 <section id="secCh" hidden>
   <h2>3. Programmation du clavier (puce CH57x)</h2>
   <p id="chInfo" class="mut" style="margin:0 0 8px"></p>
-  <p class="mut" style="margin:0 0 10px">Ces puces ne permettent pas de <b>relire</b> leur mémoire : l'appli affiche donc la dernière programmation envoyée depuis ce navigateur (à gauche), et le testeur ci-dessous permet de vérifier ce que le clavier envoie réellement.</p>
+  <p class="mut" style="margin:0 0 10px">Ces puces ne permettent pas de <b>relire</b> leur mémoire : l'appli affiche donc la dernière programmation envoyée depuis ce navigateur, et le testeur ci-dessous permet de vérifier ce que le clavier envoie réellement.</p>
   <div class="row">
     <label>Touches <input type="number" id="chBtns" min="1" max="12" value="6"></label>
     <label>Potentiomètres <input type="number" id="chKnobs" min="0" max="3" value="1"></label>
@@ -93,6 +100,8 @@ table{border-collapse:collapse;width:100%;font-size:13px}td,th{border-bottom:1px
     <button class="p" id="chWriteAll">Tout écrire dans le clavier</button>
     <button id="chUsb" hidden>Connexion WebUSB…</button>
   </div>
+  <div id="chPad" style="margin-top:12px"></div>
+  <p class="mut" style="margin:4px 0 0;text-align:center">Cliquez sur une touche pour la configurer. Elle s’allume quand vous appuyez sur la touche du clavier (dans le champ testeur plus bas, ou sur cette page).</p>
   <table id="chTable" style="margin-top:10px"></table>
   <details style="margin-top:8px"><summary class="mut">Trames envoyées</summary><pre id="chDump">—</pre></details>
 </section>
@@ -453,7 +462,7 @@ function chBuild(model, layer, id, slot) {
   return msgs;
 }
 
-const CH = { info: null, usb: null, usbEp: 0, slots: {}, key: '' };
+const CH = { sel: 'b0', info: null, usb: null, usbEp: 0, slots: {}, key: '' };
 function chLoad() { try { CH.slots = JSON.parse(localStorage.getItem('clavier-ch-' + CH.key) || '{}'); } catch { CH.slots = {}; } }
 function chSave() { try { localStorage.setItem('clavier-ch-' + CH.key, JSON.stringify(CH.slots)); } catch {} }
 function chHidPlan(d) {
@@ -487,7 +496,7 @@ function chRender() {
   const layer = +$('#chLayer').value, t = $('#chTable'); t.innerHTML = '<tr><th>Emplacement</th><th>Action</th><th>Réglage</th><th></th></tr>';
   chSlots().forEach(s => {
     const key = chSlotKey(s, layer), v = CH.slots[key] || (CH.slots[key] = { type: 'key', text: '' });
-    const tr = document.createElement('tr');
+    const tr = document.createElement('tr'); tr.dataset.slot = s.k; tr.onclick = ev => { if (CH.sel !== s.k) { CH.sel = s.k; chMarkSel(); } };
     const opts = [['key', 'Touche / raccourci'], ['media', 'Média'], ['click', 'Clic souris'], ['wheel', 'Molette']].map(([a, b]) => `<option value="${a}" ${v.type === a ? 'selected' : ''}>${b}</option>`).join('');
     tr.innerHTML = `<td>${s.name}</td><td><select class="ty">${opts}</select></td><td class="cfg"></td><td><button class="wr">Écrire</button></td><td class="mut st"></td>`;
     const cfg = tr.querySelector('.cfg');
@@ -500,16 +509,18 @@ function chRender() {
       else cfg.innerHTML = `<select class="wh"><option value="1" ${v.wheel == 1 ? 'selected' : ''}>Vers le haut</option><option value="255" ${v.wheel == 255 ? 'selected' : ''}>Vers le bas</option></select>`;
     };
     draw();
-    tr.querySelector('.ty').onchange = e => { v.type = e.target.value; draw(); chSave(); };
+    tr.querySelector('.ty').onchange = e => { v.type = e.target.value; draw(); chSave(); chRenderPad(); };
     cfg.addEventListener('input', () => {
       const x = cfg.querySelector('.tx'), md = cfg.querySelector('.md'), wh = cfg.querySelector('.wh');
       if (x) v.text = x.value; if (md) v.media = +md.value; if (wh) v.wheel = +wh.value;
       if (v.type === 'click') v.btn = [...cfg.querySelectorAll('.bt')].reduce((a, b) => a | (b.checked ? +b.value : 0), 0);
-      chSave();
+      chSave(); chRenderPad();
     });
     tr.querySelector('.wr').onclick = async () => { await chWrite([s], layer, tr.querySelector('.st')); };
     t.appendChild(tr);
   });
+  if (!CH.sel || !chSlots().some(x => x.k === CH.sel)) CH.sel = 'b0';
+  chRenderPad();
 }
 async function chWrite(list, layer, stEl) {
   const model = CH.info.m;
@@ -544,6 +555,70 @@ $('#chUsb').onclick = async () => {
 };
 $('#chWriteAll').onclick = () => chWrite(chSlots(), +$('#chLayer').value, null);
 ['#chLayer', '#chBtns', '#chKnobs'].forEach(q => $(q).onchange = chRender);
+
+
+/* ---------- Image du clavier ---------- */
+const chLabel = v => !v ? '—' : v.type === 'key' ? (v.text || '—') : v.type === 'media' ? ((CH_MEDIA.find(m => m[1] === +v.media) || [''])[0] || '—')
+  : v.type === 'click' ? 'Clic ' + ([['G', 1], ['D', 2], ['M', 4]].filter(([, b]) => (v.btn | 0) & b).map(x => x[0]).join('+') || '—') : 'Molette ' + (v.wheel == 255 ? '↓' : '↑');
+const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+function chRenderPad() {
+  const layer = +$('#chLayer').value, n = +$('#chBtns').value, kn = +$('#chKnobs').value, slots = chSlots();
+  const val = s => CH.slots[chSlotKey(s, layer)];
+  const cols = n > 3 ? Math.ceil(n / 2) : n, rows = Math.ceil(n / cols), kw = kn * 130, W = 30 + kw + cols * 84 + 20, H = Math.max(200, 40 + rows * 84 + 20, kn ? 230 : 0);
+  let g = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Clavier"><rect class="body" x="4" y="4" width="${W - 8}" height="${H - 8}" rx="18"/>`;
+  for (let j = 0; j < kn; j++) {
+    const cx = 30 + j * 130 + 50, cy = 90, sl = a => slots.find(s => s.k === 'k' + j + '_' + a);
+    g += `<g class="pk" data-slot="k${j}_1"><circle cx="${cx}" cy="${cy}" r="38"/><text x="${cx}" y="${cy - 2}">Potar ${j + 1}</text><text class="t" x="${cx}" y="${cy + 12}">${esc(chLabel(val(sl(1))).slice(0, 14))}</text></g>`;
+    [[0, '⟲', cx - 46], [2, '⟳', cx + 6]].forEach(([a, sym, x]) => {
+      g += `<g class="pk" data-slot="k${j}_${a}"><rect x="${x}" y="150" width="40" height="42" rx="8"/><text x="${x + 20}" y="168">${sym}</text><text class="t" x="${x + 20}" y="183">${esc(chLabel(val(sl(a))).slice(0, 7))}</text></g>`;
+    });
+  }
+  for (let i = 0; i < n; i++) {
+    const x = 30 + kw + (i % cols) * 84, y = 30 + Math.floor(i / cols) * 84;
+    g += `<g class="pk" data-slot="b${i}"><rect x="${x}" y="${y}" width="74" height="74" rx="10"/><text class="t" x="${x + 37}" y="${y + 24}">Touche ${i + 1}</text><text x="${x + 37}" y="${y + 46}">${esc(chLabel(val(slots.find(s => s.k === 'b' + i))).slice(0, 12))}</text></g>`;
+  }
+  $('#chPad').innerHTML = g + '</svg>';
+  document.querySelectorAll('#chPad .pk').forEach(el => { el.onclick = () => chSelect(el.dataset.slot); });
+  chMarkSel();
+}
+function chMarkSel() {
+  document.querySelectorAll('#chPad .pk').forEach(el => el.classList.toggle('sel', el.dataset.slot === CH.sel));
+  document.querySelectorAll('#chTable tr[data-slot]').forEach(tr => tr.classList.toggle('sel', tr.dataset.slot === CH.sel));
+}
+function chSelect(k) {
+  CH.sel = k; chMarkSel();
+  const tr = document.querySelector(`#chTable tr[data-slot="${k}"]`);
+  if (tr) { tr.scrollIntoView({ block: 'nearest', behavior: 'smooth' }) }
+}
+function chFlash(keys) {
+  keys.forEach(k => { const el = document.querySelector(`#chPad .pk[data-slot="${k}"]`); if (el) { el.classList.add('on'); setTimeout(() => el.classList.remove('on'), 350); } });
+}
+const EVNAME = { ' ': 'space', arrowup: 'up', arrowdown: 'down', arrowleft: 'left', arrowright: 'right' };
+function chMatchKey(e) {
+  if (!CH.info || $('#secCh').hidden) return [];
+  const lk = (EVNAME[e.key.toLowerCase()] || e.key.toLowerCase());
+  let code = null; try { code = chCode(lk); } catch { if (e.key === 'Control' || e.key === 'Shift' || e.key === 'Alt' || e.key === 'Meta') code = null; else return []; }
+  const mods = (e.ctrlKey ? 1 : 0) | (e.shiftKey ? 2 : 0) | (e.altKey ? 4 : 0) | (e.metaKey ? 8 : 0);
+  const layer = +$('#chLayer').value, hit = [];
+  chSlots().forEach(s => {
+    const v = CH.slots[chSlotKey(s, layer)]; if (!v || v.type !== 'key' || !v.text) return;
+    let seq; try { seq = chParse(v.text); } catch { return; }
+    const [m, c] = seq[0], mm = m & 15;
+    if (c == null ? (code == null || (['Control','Shift','Alt','Meta'].includes(e.key) && (m & ({ Control: 1, Shift: 2, Alt: 4, Meta: 8 }[e.key])))) && (mods | ({ Control: 1, Shift: 2, Alt: 4, Meta: 8 }[e.key] || 0)) === mm
+        : c === code && mods === mm) hit.push(s.k);
+  });
+  return hit;
+}
+document.addEventListener('keydown', e => {
+  const t = e.target;
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT') && t.id !== 'tester') return;
+  chFlash(chMatchKey(e));
+});
+const testerEl = $('#tester');
+testerEl.addEventListener('mousedown', e => { if (!CH.info) return; const b = [1, 4, 2][e.button] || 0, layer = +$('#chLayer').value;
+  chFlash(chSlots().filter(s => { const v = CH.slots[chSlotKey(s, layer)]; return v && v.type === 'click' && ((v.btn | 0) & b); }).map(s => s.k)); });
+testerEl.addEventListener('wheel', e => { if (!CH.info) return; const d = e.deltaY < 0 ? 1 : 255, layer = +$('#chLayer').value;
+  chFlash(chSlots().filter(s => { const v = CH.slots[chSlotKey(s, layer)]; return v && v.type === 'wheel' && +v.wheel === d; }).map(s => s.k)); });
 
 /* ---------- Init ---------- */
 $('#btnDemo').onclick = () => { S.demo = true; inspect(makeDemo()); };
