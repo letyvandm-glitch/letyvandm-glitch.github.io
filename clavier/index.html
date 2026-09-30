@@ -111,6 +111,7 @@ table{border-collapse:collapse;width:100%;font-size:13px}td,th{border-bottom:1px
     <select id="chLayer" hidden><option value="0">1</option><option value="1">2</option><option value="2">3</option></select>
     <button class="p" id="chWriteAll">Tout écrire dans le clavier</button>
     <button id="chUsb" hidden>Connexion WebUSB…</button>
+    <button id="chExport">Exporter (outil ch57x)</button>
     <span id="chStatus"></span>
   </div>
   <div class="chwrap">
@@ -254,7 +255,7 @@ async function refreshDevices() {
     const id = devKey(d), div = document.createElement('div');
     div.className = 'dev' + (S.dev === d ? ' sel' : '');
     const cols = d.collections.map(c => `<span class="tag ${c.usagePage === VIA_UP ? 'ok' : ''}">page ${hex(c.usagePage)} / usage ${hex(c.usage, 2)}</span>`).join('');
-    div.innerHTML = `<div><b>${d.productName || 'Périphérique sans nom'}</b> <span class="mut">${id}</span>${KNOWN[id] ? `<br><span class="tag ok">${KNOWN[id]}</span>` : ''}<br>${cols}</div>`;
+    div.innerHTML = `<div><b>${d.productName || 'Périphérique sans nom'}</b> <span class="mut">${id}</span>${KNOWN[id] ? `<br><span class="tag ok">${KNOWN[id]}</span>` : ''}${typeof CH57 !== 'undefined' && CH57[id] && chHidPlan(d) ? ' <span class="tag ok">écriture possible</span>' : ''}<br>${cols}</div>`;
     const b = document.createElement('button'); b.className = 'p'; b.textContent = 'Lire';
     b.onclick = () => inspect(d); div.appendChild(b); el.appendChild(div);
   });
@@ -622,15 +623,53 @@ async function chWrite(list, layer, stEl) {
 
   } catch (e) { const t = e.message || String(e); if (stEl) { stEl.className = 'err'; stEl.textContent = t; } else alert('Échec : ' + t); }
 }
-function chStart(d, id) {
+const collTxt = d => d.collections.map(c => `page ${hex(c.usagePage)} / usage ${hex(c.usage, 2)} (${(c.inputReports || []).length} entrée, ${(c.outputReports || []).length} sortie)`).join(' ; ') || 'aucune collection';
+async function chStart(d, id) {
   CH.info = CH57[id]; CH.key = id; CH.usb = null; chLoad();
   $('#secCh').hidden = false; $('#secCfg').hidden = true;
+  let note = '';
+  if (!chHidPlan(d) && navigator.hid) {
+    const sib = (await navigator.hid.getDevices()).filter(x => x.vendorId === d.vendorId && x.productId === d.productId);
+    const ok = sib.find(x => chHidPlan(x));
+    if (ok) { try { if (!ok.opened) await ok.open(); S.dev = ok; d = ok; note = ' <span class="ok">Bascule automatique sur l’entrée du clavier qui accepte l’écriture.</span>'; refreshDevices(); } catch (e) { note = ` <span class="err">Ouverture impossible : ${esc(e.message)}</span>`; } }
+    else note = `<br><span class="err">Aucune entrée autorisée de ce clavier n’accepte l’écriture.</span> Entrées vues (${sib.length}) : ${sib.map(x => esc(collTxt(x))).join(' | ')}.<br>Cliquez sur « Chercher / autoriser » et autorisez <b>toutes</b> les entrées ${id} proposées (Ctrl + clic pour en sélectionner plusieurs).`;
+  }
   const plan = chHidPlan(d);
-  $('#chInfo').innerHTML = `Puce <b>${id}</b> reconnue (protocole ${CH.info.m === 'a' ? '884x' : '8890'}). ` +
-    (plan ? `<span class="ok">Écriture WebHID disponible sur cette entrée.</span>` : `<span class="err">Cette entrée HID n’a pas de rapport d’écriture : essayez l’autre entrée du même clavier dans la liste, ou WebUSB.</span>`);
+  $('#chInfo').innerHTML = `Puce <b>${id}</b> reconnue (protocole ${CH.info.m === 'a' ? '884x' : '8890'}). ` + (plan ? `<span class="ok">Écriture WebHID disponible.</span>` : '') + note;
   $('#chUsb').hidden = !navigator.usb;
   chRender();
 }
+const CH_MEDIA_NAMES = { 0x6F: 'screenbrightnessup', 0x70: 'screenbrightnessdown', 0xB5: 'next', 0xB6: 'previous', 0xB7: 'stop', 0xCD: 'play', 0xE2: 'mute', 0xE9: 'volumeup', 0xEA: 'volumedown', 0x182: 'favorites', 0x192: 'calculator', 0x19E: 'screenlock', 0x223: 'webpagehome', 0x224: 'webpageback', 0x225: 'webpageforward' };
+function chYamlAction(v) {
+  if (!v) return '<0>';
+  if (v.type === 'key') {
+    if (!v.text) return '<0>';
+    return chParse(v.text).map(([m, c]) => {
+      const parts = [[1, 'ctrl'], [2, 'shift'], [4, 'alt'], [8, 'win'], [16, 'rctrl'], [32, 'rshift'], [64, 'ralt'], [128, 'rwin']].filter(([b]) => m & b).map(x => x[1]);
+      if (c != null) parts.push(c >= 4 && c <= 29 ? String.fromCharCode(93 + c) : c >= 0x1E && c <= 0x26 ? String(c - 0x1D) : c === 0x27 ? '0' : `<${c}>`);
+      return parts.join('-');
+    }).join(',');
+  }
+  if (v.type === 'media') return CH_MEDIA_NAMES[+v.media] || '<0>';
+  if (v.type === 'click') return [[1, 'click'], [2, 'rclick'], [4, 'mclick']].filter(([b]) => (v.btn | 0) & b).map(x => x[1]).join('+') || '<0>';
+  return +v.wheel === 255 ? 'wheeldown' : 'wheelup';
+}
+function chYaml() {
+  const n = +$('#chBtns').value, kn = +$('#chKnobs').value, rows = n <= 3 ? 1 : n <= 6 ? 2 : 3, cols = Math.ceil(n / rows);
+  let y = `# Généré par l'appli Clavier — à utiliser avec ch57x-keyboard-tool (validate puis upload)\nmodel: ${CH.info.m === 'a' ? 'ch57x-1' : 'ch57x-2'}\norientation: normal\nrows: ${rows}\ncolumns: ${cols}\nknobs: ${kn}\nlayers:\n`;
+  for (let l = 0; l < 3; l++) {
+    y += '  - buttons:\n';
+    for (let r = 0; r < rows; r++) y += '      - [' + Array.from({ length: cols }, (_, c) => { const i = r * cols + c; return i < n ? JSON.stringify(chYamlAction(CH.slots[l + ':b' + i])) : '"<0>"'; }).join(', ') + ']\n';
+    y += '    knobs:\n';
+    for (let j = 0; j < kn; j++) y += `      - ccw: ${JSON.stringify(chYamlAction(CH.slots[l + ':k' + j + '_0']))}\n        press: ${JSON.stringify(chYamlAction(CH.slots[l + ':k' + j + '_1']))}\n        cw: ${JSON.stringify(chYamlAction(CH.slots[l + ':k' + j + '_2']))}\n`;
+  }
+  return y;
+}
+$('#chExport').onclick = () => {
+  try {
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([chYaml()], { type: 'text/yaml' })); a.download = 'mapping.yaml'; a.click();
+  } catch (e) { alert('Export impossible : ' + e.message); }
+};
 $('#chUsb').onclick = async () => {
   try {
     const u = await navigator.usb.requestDevice({ filters: [{ vendorId: 0x1189 }, { vendorId: 0x514C }] });
