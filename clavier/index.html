@@ -104,6 +104,7 @@ table{border-collapse:collapse;width:100%;font-size:13px}td,th{border-bottom:1px
   <h2>3. Programmation du clavier</h2>
   <p id="chInfo" style="margin:0 0 6px"></p>
   <p class="mut" style="margin:0 0 10px">Ces puces ne permettent pas de <b>relire</b> leur mémoire : l'appli affiche la dernière programmation envoyée depuis ce navigateur. Le testeur plus bas vérifie ce que le clavier envoie réellement.</p>
+  <div class="seg" id="chMode"><button data-mode="read">Lecture de la programmation</button><button data-mode="edit">Paramétrage</button></div>
   <div class="row">
     <span class="mut">Couche :</span>
     <div class="tabs" id="chLayers"></div>
@@ -481,7 +482,7 @@ function chBuild(model, layer, id, slot) {
   return msgs;
 }
 
-const CH = { sel: 'b0', info: null, usb: null, usbEp: 0, slots: {}, key: '' };
+const CH = { mode: 'read', survey: null, sel: 'b0', info: null, usb: null, usbEp: 0, slots: {}, key: '' };
 function chLoad() { try { CH.slots = JSON.parse(localStorage.getItem('clavier-ch-' + CH.key) || '{}'); } catch { CH.slots = {}; } }
 function chSave() { try { localStorage.setItem('clavier-ch-' + CH.key, JSON.stringify(CH.slots)); } catch {} }
 function chHidPlan(d) {
@@ -533,9 +534,12 @@ function chRender() {
   const layer = +$('#chLayer').value, tabs = $('#chLayers'); tabs.innerHTML = '';
   for (let l = 0; l < 3; l++) { const b = document.createElement('button'); b.textContent = l + 1; b.className = l === layer ? 'on' : ''; b.onclick = () => { $('#chLayer').value = l; chRender(); }; tabs.appendChild(b); }
   if (!CH.sel || !chSlots().some(x => x.k === CH.sel)) CH.sel = 'b0';
+  document.querySelectorAll('#chMode button').forEach(b => { b.className = b.dataset.mode === CH.mode ? 'on' : ''; b.onclick = () => { CH.mode = b.dataset.mode; CH.survey = null; chCapture = null; chRender(); }; });
+  $('#chWriteAll').hidden = CH.mode !== 'edit';
   chRenderPad(); chRenderEdit();
 }
 function chRenderEdit() {
+  if (CH.mode === 'read') return chRenderRead();
   const layer = +$('#chLayer').value, s = chSlots().find(x => x.k === CH.sel), box = $('#chEdit');
   const key = chSlotKey(s, layer), v = CH.slots[key] || (CH.slots[key] = { type: 'key', text: '' });
   if (v.type === 'media' && v.media == null) v.media = CH_MEDIA[0][1];
@@ -567,14 +571,39 @@ function chRenderEdit() {
   box.querySelectorAll('.bt').forEach(b => b.onchange = () => { v.btn = [...box.querySelectorAll('.bt')].reduce((a, x) => a | (x.checked ? +x.value : 0), 0); chSave(); chRenderPad(); });
   $('#edWrite').onclick = () => chWrite([s], layer, $('#chStatus'));
 }
+function chRenderRead() {
+  const layer = +$('#chLayer').value, box = $('#chEdit'), list = chSlots();
+  const rows = list.map(s => { const v = CH.slots[chSlotKey(s, layer)];
+    return `<tr data-slot="${s.k}" class="${s.k === CH.sel ? 'sel' : ''}"><td>${s.name}</td><td><b>${esc(chLabel(v))}</b> <span class="mut">${chSub(v) || ''}</span></td></tr>`; }).join('');
+  const sv = CH.survey;
+  box.innerHTML = `<h3>Programmation enregistrée <span class="mut" style="font-weight:400">· couche ${layer + 1}</span></h3>
+    <p class="mut" style="margin:0 0 8px;font-size:13px">Lecture seule. Ces puces ne peuvent pas être relues directement : voici la dernière programmation envoyée depuis ce navigateur, ou relevée avec le bouton ci-dessous.</p>
+    <table>${rows}</table>
+    <div class="row" style="margin-top:10px">${sv ? `<b class="ok">Appuyez sur : ${sv.list[sv.i].name}</b><button id="rdSkip">Passer</button><button id="rdStop">Arrêter</button>`
+      : `<button class="p" id="rdSurvey">Relever depuis le clavier</button><button id="rdEdit">Modifier…</button>`}</div>
+    <p class="mut" style="margin:6px 0 0;font-size:12px">« Relever » : appuyez tour à tour sur chaque touche du clavier physique ; l'appli enregistre le raccourci qu'elle envoie (les touches média et souris ne peuvent pas être relevées).</p>`;
+  box.querySelectorAll('tr[data-slot]').forEach(tr => tr.onclick = () => chSelect(tr.dataset.slot));
+  const b1 = $('#rdSurvey'); if (b1) b1.onclick = () => { CH.survey = { list, i: 0, layer }; chSurveyNext(0); };
+  const b2 = $('#rdEdit'); if (b2) b2.onclick = () => { CH.mode = 'edit'; chRender(); };
+  const sk = $('#rdSkip'); if (sk) sk.onclick = () => chSurveyNext(CH.survey.i + 1);
+  const st = $('#rdStop'); if (st) st.onclick = () => { CH.survey = null; chCapture = null; chRender(); };
+}
+function chSurveyNext(i) {
+  const sv = CH.survey; if (!sv) return;
+  if (i >= sv.list.length) { CH.survey = null; chCapture = null; chSave(); chRender(); $('#chStatus').className = 'ok'; $('#chStatus').textContent = 'Relevé terminé'; return; }
+  sv.i = i; CH.sel = sv.list[i].k; chCapture = { survey: true, mods: 0 };
+  chRenderPad(); chRenderRead();
+}
 function chFinishCapture(text) {
-  const cap = chCapture; chCapture = null; if (!text) return chRenderEdit();
+  const cap = chCapture;
+  if (cap && cap.survey) { const sv = CH.survey; if (text) CH.slots[chSlotKey(sv.list[sv.i], sv.layer)] = { type: 'key', text }; chCapture = null; return chSurveyNext(sv.i + 1); }
+  chCapture = null; if (!text) return chRenderEdit();
   const layer = +$('#chLayer').value, s = chSlots().find(x => x.k === CH.sel), v = CH.slots[chSlotKey(s, layer)];
   v.text = cap.append && v.text ? v.text.trim() + ' ' + text : text; chSave(); chRenderEdit(); chRenderPad();
 }
 document.addEventListener('keydown', e => {
   if (!chCapture) return; e.preventDefault(); e.stopPropagation();
-  if (e.key === 'Escape' && !e.ctrlKey && !e.shiftKey && !e.altKey) return chFinishCapture(null);
+  if (e.key === 'Escape' && !chCapture.survey && !e.ctrlKey && !e.shiftKey && !e.altKey) return chFinishCapture(null);
   const tok = evToken(e), isMod = ['Control', 'Shift', 'Alt', 'Meta'].includes(e.key);
   if (isMod) { chCapture.mods = evModsText(e).length; chCapture.last = evModsText(e); return; }
   if (!tok) return; chFinishCapture(evModsText(e).concat(tok).join('+'));
@@ -621,7 +650,7 @@ $('#chWriteAll').onclick = () => chWrite(chSlots(), +$('#chLayer').value, $('#ch
 /* ---------- Image du clavier ---------- */
 const chLabel = v => !v ? '—' : v.type === 'key' ? (v.text || '—') : v.type === 'media' ? ((CH_MEDIA.find(m => m[1] === +v.media) || [''])[0] || '—')
   : v.type === 'click' ? 'Clic ' + ([['G', 1], ['D', 2], ['M', 4]].filter(([, b]) => (v.btn | 0) & b).map(x => x[0]).join('+') || '—') : 'Molette ' + (v.wheel == 255 ? '↓' : '↑');
-const chSub = v => !v ? '' : ({ key: 'raccourci', media: 'média', click: 'souris', wheel: 'souris' })[v.type];
+const chSub = v => (!v || chLabel(v) === '—') ? '' : ({ key: 'raccourci', media: 'média', click: 'souris', wheel: 'souris' })[v.type];
 const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 function chRenderPad() {
   const layer = +$('#chLayer').value, n = +$('#chBtns').value, kn = +$('#chKnobs').value, slots = chSlots();
