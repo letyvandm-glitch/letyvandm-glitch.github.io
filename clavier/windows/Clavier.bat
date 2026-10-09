@@ -1,6 +1,10 @@
 @echo off
-rem Ouvre l'appli Clavier dans une fenetre dediee (Chrome ou Edge), sans barre d'adresse.
+rem Controle les prerequis (pilote USBDK, outil ch57x) puis ouvre l'appli Clavier
+rem dans une fenetre dediee (Chrome ou Edge), sans barre d'adresse.
 set "URL=https://letyvandm-glitch.github.io/clavier/"
+if exist "%~dp0Verifier-prerequis.ps1" (
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0Verifier-prerequis.ps1"
+)
 set "CHROME1=%ProgramFiles%\Google\Chrome\Application\chrome.exe"
 set "CHROME2=%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"
 set "CHROME3=%LocalAppData%\Google\Chrome\Application\chrome.exe"
