@@ -4,6 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Clavier 6 touches</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="theme-color" content="#171b24">
 <style>
 :root{--bg:#f5f6f8;--card:#fff;--fg:#1c2130;--mut:#6b7385;--line:#dde1e9;--acc:#3b6cf6;--acc-fg:#fff;--ok:#1a8a4a;--warn:#b26a00;--err:#c62f2f;--key:#eef1f7}
 @media(prefers-color-scheme:dark){:root{--bg:#12151c;--card:#1b202b;--fg:#e8ebf2;--mut:#98a0b3;--line:#2b3242;--acc:#6d94ff;--acc-fg:#0d1220;--ok:#4cc27f;--warn:#f0a83a;--err:#ff7070;--key:#252c3b}}
@@ -68,6 +72,7 @@ table{border-collapse:collapse;width:100%;font-size:13px}td,th{border-bottom:1px
   <div class="row">
     <button class="p" id="btnConnect">Chercher / autoriser un périphérique…</button>
     <button id="btnDemo">Mode démo (sans clavier)</button>
+    <button id="btnInstall" hidden>Installer l’application (raccourci bureau)</button>
     <span id="support" class="mut"></span>
   </div>
   <div id="devs"></div>
@@ -789,6 +794,13 @@ testerEl.addEventListener('mousedown', e => { if (!CH.info) return; const b = [1
   chFlash(chSlots().filter(s => { const v = CH.slots[chSlotKey(s, layer)]; return v && v.type === 'click' && ((v.btn | 0) & b); }).map(s => s.k)); });
 testerEl.addEventListener('wheel', e => { if (!CH.info) return; const d = e.deltaY < 0 ? 1 : 255, layer = +$('#chLayer').value;
   chFlash(chSlots().filter(s => { const v = CH.slots[chSlotKey(s, layer)]; return v && v.type === 'wheel' && +v.wheel === d; }).map(s => s.k)); });
+
+/* ---------- Installation comme application (raccourci bureau) ---------- */
+let installEvt = null;
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; $('#btnInstall').hidden = false; });
+window.addEventListener('appinstalled', () => { installEvt = null; $('#btnInstall').hidden = true; });
+$('#btnInstall').onclick = async () => { if (!installEvt) return; installEvt.prompt(); try { await installEvt.userChoice; } catch {} installEvt = null; $('#btnInstall').hidden = true; };
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {});
 
 /* ---------- Init ---------- */
 $('#btnDemo').onclick = () => { S.demo = true; inspect(makeDemo()); };
